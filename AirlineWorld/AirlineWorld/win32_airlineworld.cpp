@@ -2,142 +2,169 @@
 // compile with: /D_UNICODE /DUNICODE /DWIN32 /D_WINDOWS /c
 
 #include <windows.h>
-#include <stdlib.h>
-#include <string.h>
-#include <tchar.h>
 
-// Global variables
+#define internal static 
+#define local_persist static 
+#define global_variable static
 
-// The main window class name.
-static TCHAR szWindowClass[] = _T("AirlineWorld");
+// TODO: This is a global for now.
+global_variable bool Running;
 
-// The string that appears in the application's title bar.
-static TCHAR szTitle[] = _T("Airline World");
+global_variable BITMAPINFO BitmapInfo;
+global_variable void *BitmapMemory;
+global_variable HBITMAP BitmapHandle;
+global_variable HDC BitmapDeviceContext;
 
-HINSTANCE hInst;
-
-// Forward declarations of functions included in this code module:
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-
-int CALLBACK WinMain(
-	_In_ HINSTANCE hInstance,
-	_In_ HINSTANCE hPrevInstance,
-	_In_ LPSTR     lpCmdLine,
-	_In_ int       nCmdShow
-)
+internal void Win32ResizeDIBSection(int Width, int Height)
 {
-	WNDCLASSEX wcex;
+	// TODO: Bulletproof this.
+	// Maybe don't free first, free after, then free first if that fails.
 
-	wcex.cbSize = sizeof(WNDCLASSEX);
-	wcex.style = CS_HREDRAW | CS_VREDRAW;
-	wcex.lpfnWndProc = WndProc;
-	wcex.cbClsExtra = 0;
-	wcex.cbWndExtra = 0;
-	wcex.hInstance = hInstance;
-	wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
-	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-	wcex.lpszMenuName = NULL;
-	wcex.lpszClassName = szWindowClass;
-	wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
-
-	if (!RegisterClassEx(&wcex))
+	if (BitmapHandle)
 	{
-		MessageBox(NULL,
-			_T("Call to RegisterClassEx failed!"),
-			_T("Airline World"),
-			NULL);
-
-		return 1;
+		DeleteObject(BitmapHandle);
 	}
 
-	// Store instance handle in our global variable
-	hInst = hInstance;
-
-	// The parameters to CreateWindow explained:
-	// szWindowClass: the name of the application
-	// szTitle: the text that appears in the title bar
-	// WS_OVERLAPPEDWINDOW: the type of window to create
-	// CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
-	// 500, 100: initial size (width, length)
-	// NULL: the parent of this window
-	// NULL: this application does not have a menu bar
-	// hInstance: the first parameter from WinMain
-	// NULL: not used in this application
-	HWND hWnd = CreateWindow(
-		szWindowClass,
-		szTitle,
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT, CW_USEDEFAULT,
-		500, 100,
-		NULL,
-		NULL,
-		hInstance,
-		NULL
-	);
-
-	if (!hWnd)
+	if (!BitmapDeviceContext)
 	{
-		MessageBox(NULL,
-			_T("Call to CreateWindow failed!"),
-			_T("Airline World"),
-			NULL);
-
-		return 1;
+		// TODO: Should we recreate these under certain special circumstances
+		BitmapDeviceContext = CreateCompatibleDC(0);
 	}
 
-	// The parameters to ShowWindow explained:
-	// hWnd: the value returned from CreateWindow
-	// nCmdShow: the fourth parameter from WinMain
-	ShowWindow(hWnd,
-		nCmdShow);
-	UpdateWindow(hWnd);
+	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
+	BitmapInfo.bmiHeader.biWidth = Width;
+	BitmapInfo.bmiHeader.biHeight = Height;
+	BitmapInfo.bmiHeader.biPlanes = 1;
+	BitmapInfo.bmiHeader.biBitCount = 32;
+	BitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-	// Main message loop:
-	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0))
-	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
+	// TODO: Based on ssylvan's suggestion, maybe we can just
+	// allocate this ourselves?
 
-	return (int)msg.wParam;
+	BitmapHandle = CreateDIBSection(
+		BitmapDeviceContext, &BitmapInfo,
+		DIB_RGB_COLORS,
+		&BitmapMemory,
+		0, 0);
 }
 
-//  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  PURPOSE:  Processes messages for the main window.
-//
-//  WM_PAINT    - Paint the main window
-//  WM_DESTROY  - post a quit message and return
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+internal void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
 {
-	PAINTSTRUCT ps;
-	HDC hdc;
-	TCHAR greeting[] = _T("Hello, Windows desktop!");
+	StretchDIBits(DeviceContext,
+		X, Y, Width, Height,
+		X, Y, Width, Height,
+		BitmapMemory,
+		&BitmapInfo,
+		DIB_RGB_COLORS, SRCCOPY);
+}
 
-	switch (message)
+LRESULT CALLBACK Win32MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
+{
+	LRESULT Result = 0;
+
+	switch (Message)
 	{
-	case WM_PAINT:
-		hdc = BeginPaint(hWnd, &ps);
+	case WM_SIZE:
+	{
+		RECT ClientRect;
+		GetClientRect(Window, &ClientRect);
+		int Width = ClientRect.right - ClientRect.left;
+		int Height = ClientRect.bottom - ClientRect.top;
+		Win32ResizeDIBSection(Width, Height);
+	} break;
 
-		// Here your application is laid out.
-		// For this introduction, we just print out "Hello, Windows desktop!"
-		// in the top left corner.
-		TextOut(hdc,
-			5, 5,
-			greeting, _tcslen(greeting));
-		// End application-specific layout section.
+	case WM_CLOSE:
+	{
+		// TODO: Handle this with a message to the user?
+		Running = false;
+	} break;
 
-		EndPaint(hWnd, &ps);
-		break;
+	case WM_ACTIVATEAPP:
+	{
+		OutputDebugStringA("WM_ACTIVATEAPP\n");
+	} break;
+
 	case WM_DESTROY:
-		PostQuitMessage(0);
-		break;
+	{
+		// TODO: Handle this as an error - recreate window?
+		Running = false;
+	} break;
+
+	case WM_PAINT:
+	{
+		PAINTSTRUCT Paint;
+		HDC DeviceContext = BeginPaint(Window, &Paint);
+		int X = Paint.rcPaint.left;
+		int Y = Paint.rcPaint.top;
+		int Width = Paint.rcPaint.right - Paint.rcPaint.left;
+		int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
+		Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
+		EndPaint(Window, &Paint);
+	} break;
+
 	default:
-		return DefWindowProc(hWnd, message, wParam, lParam);
-		break;
+	{
+		//            OutputDebugStringA("default\n");
+		Result = DefWindowProc(Window, Message, WParam, LParam);
+	} break;
 	}
 
-	return 0;
+	return(Result);
+}
+
+int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine,	int ShowCode)
+{
+	WNDCLASS WindowClass = {};
+
+	// TODO: Check if HREDRAW/VREDRAW/OWNDC still matter
+	WindowClass.lpfnWndProc = Win32MainWindowCallback;
+	WindowClass.hInstance = Instance;
+	//    WindowClass.hIcon;
+	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
+
+	if (RegisterClassA(&WindowClass))
+	{
+		HWND WindowHandle =
+			CreateWindowExA(
+				0,
+				WindowClass.lpszClassName,
+				"Handmade Hero",
+				WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+				CW_USEDEFAULT,
+				CW_USEDEFAULT,
+				CW_USEDEFAULT,
+				CW_USEDEFAULT,
+				0,
+				0,
+				Instance,
+				0);
+		if (WindowHandle)
+		{
+			Running = true;
+			while (Running)
+			{
+				MSG Message;
+				BOOL MessageResult = GetMessageA(&Message, 0, 0, 0);
+				if (MessageResult > 0)
+				{
+					TranslateMessage(&Message);
+					DispatchMessageA(&Message);
+				}
+				else
+				{
+					break;
+				}
+			}
+		}
+		else
+		{
+			// TODO: Logging
+		}
+	}
+	else
+	{
+		// TODO: Logging
+	}
+
+	return(0);
 }
